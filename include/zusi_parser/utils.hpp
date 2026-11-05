@@ -316,6 +316,25 @@ public:
         return std::string(osPfad.substr(datenpfad.size()));
       }
 
+      // Eine direkt geoeffnete Datei kann aus einer anderen Zusi-Installation
+      // stammen (z. B. Steam statt der in der Registry eingetragenen Version).
+      // Modulreferenzen verwenden auch dort Pfade relativ zu _ZusiData.
+      const fs::path dateipfad(osPfad.begin(), osPfad.end());
+      for (auto parent = dateipfad.parent_path(); !parent.empty();) {
+        if (
+#ifdef _WIN32
+            lstrcmpiA(parent.filename().string().c_str(), "_ZusiData") == 0
+#else
+            parent.filename() == "_ZusiData"
+#endif
+        ) {
+          return dateipfad.lexically_relative(parent).string();
+        }
+        const auto next = parent.parent_path();
+        if (next == parent) break;
+        parent = next;
+      }
+
       // Allgemeiner Fall
       const auto& lexically_proximate = [](const fs::path& p, const fs::path& base) -> fs::path {
         // Taken and adapted from boost::filesystem, src/path.cpp

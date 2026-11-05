@@ -131,4 +131,22 @@ BOOST_AUTO_TEST_CASE(ZusiPfad_vonOsPfad) {
 }
 #endif
 
+
+BOOST_AUTO_TEST_CASE(ZusiPfad_vonOsPfad_AndereInstallation) {
+  const std::string_view expected = "Routes\\Deutschland\\Test\\Test.st3";
+#ifdef _WIN32
+  const auto module = ZusiPfad::vonOsPfad("X:/routegraph2-test/Other Zusi/_ZusiData/Routes/Deutschland/Test/Test.st3");
+  BOOST_TEST(module.alsZusiPfad() == expected);
+  BOOST_TEST(ZusiPfad::vonOsPfad("X:\\routegraph2-test\\Other Zusi\\_zUsIdAtA\\Routes\\Deutschland\\Test\\Test.st3").alsZusiPfad() == expected);
+  BOOST_TEST(ZusiPfad::vonOsPfad("X:/routegraph2-test/_ZusiDatabase/Routes/Deutschland/Test/Test.st3").alsZusiPfad() != expected);
+#else
+  const auto module = ZusiPfad::vonOsPfad("/tmp/routegraph2-test/Other Zusi/_ZusiData/Routes/Deutschland/Test/Test.st3");
+  BOOST_TEST(module.alsZusiPfad() == expected);
+  BOOST_TEST(ZusiPfad::vonOsPfad("/tmp/routegraph2-test/_ZusiDatabase/Routes/Deutschland/Test/Test.st3").alsZusiPfad() != expected);
+#endif
+  BOOST_TEST(ZusiPfad::vonZusiPfad("Test.st3", module).alsZusiPfad() == expected);
+  BOOST_TEST(ZusiPfad::vonOsPfad(getZusiDatenpfadOffiziell() + "Routes/Deutschland/Test/Test.st3").alsZusiPfad() == expected);
+  BOOST_TEST(ZusiPfad::vonOsPfad(getZusiDatenpfad() + "Routes/Deutschland/Test/Test.st3").alsZusiPfad() == expected);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
