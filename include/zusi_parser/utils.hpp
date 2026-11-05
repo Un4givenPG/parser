@@ -282,16 +282,18 @@ public:
 
   static ZusiPfad vonZusiPfad(std::string_view zusiPfad, const ZusiPfad& uebergeordnet) {
     if (zusiPfad.empty() || (zusiPfad.find('\\') != std::string_view::npos)) {
-      return vonZusiPfad(zusiPfad);
+      auto pfad = vonZusiPfad(zusiPfad);
+      pfad.m_datenpfadOffiziell = uebergeordnet.m_datenpfadOffiziell;
+      return pfad;
     }
 
     const auto lastBackslashPos = uebergeordnet.m_pfad.find_last_of('\\');
     if (lastBackslashPos == std::string::npos) {
-      return ZusiPfad(std::string(zusiPfad));
+      return ZusiPfad(std::string(zusiPfad), uebergeordnet.m_datenpfadOffiziell);
     } else {
       std::string pfad = uebergeordnet.m_pfad.substr(0, lastBackslashPos + 1);
       pfad += zusiPfad;
-      return ZusiPfad(std::move(pfad));
+      return ZusiPfad(std::move(pfad), uebergeordnet.m_datenpfadOffiziell);
     }
   }
 
@@ -304,7 +306,8 @@ public:
   }
 
   static ZusiPfad vonOsPfad(std::string_view osPfad) {
-    std::string relPfad = [&osPfad] {
+    std::string datenpfadOffiziellQuelle;
+    std::string relPfad = [&osPfad, &datenpfadOffiziellQuelle] {
       // Optimierung fuer (haeufige) einfache Faelle, bei denen ein Stringvergleich genuegt
       const std::string& datenpfadOffiziell = getZusiDatenpfadOffiziell();
       if (std::mismatch(datenpfadOffiziell.begin(), datenpfadOffiziell.end(), osPfad.begin(), osPfad.end()).first == datenpfadOffiziell.end()) {
@@ -328,6 +331,10 @@ public:
             parent.filename() == "_ZusiData"
 #endif
         ) {
+          datenpfadOffiziellQuelle = parent.string();
+          if (datenpfadOffiziellQuelle.back() != osSep) {
+            datenpfadOffiziellQuelle.push_back(osSep);
+          }
           return dateipfad.lexically_relative(parent).string();
         }
         const auto next = parent.parent_path();
@@ -397,7 +404,7 @@ public:
     if (relPfad.back() == '.') {
       relPfad.erase(relPfad.size() - 1);
     }
-    return ZusiPfad(std::move(relPfad));
+    return ZusiPfad(std::move(relPfad), std::move(datenpfadOffiziellQuelle));
   }
 
   std::string_view alsZusiPfad() const {
@@ -428,7 +435,8 @@ public:
       return resultEigenes;
     }
 
-    std::string resultOffiziell = getZusiDatenpfadOffiziell();
+    std::string resultOffiziell = m_datenpfadOffiziell.empty()
+        ? getZusiDatenpfadOffiziell() : m_datenpfadOffiziell;
     if constexpr (osSep != zusiSep) {
       std::replace_copy(m_pfad.begin(), m_pfad.end(), std::back_inserter(resultOffiziell), zusiSep, osSep);
     } else {
@@ -440,8 +448,12 @@ public:
 private:
   // Pfad relativ zum Zusi-Datenverzeichnis; Separator: Backslash; kein fuehrender Backslash
   std::string m_pfad;
+  // Herkunft einer direkt geoeffneten Datei aus einer anderen Installation.
+  // Referenzen erben diesen Pfad; die globalen Einstellungen bleiben erhalten.
+  std::string m_datenpfadOffiziell;
 
-  explicit ZusiPfad(std::string pfad) : m_pfad(std::move(pfad)) {}
+  explicit ZusiPfad(std::string pfad, std::string datenpfadOffiziell = {})
+      : m_pfad(std::move(pfad)), m_datenpfadOffiziell(std::move(datenpfadOffiziell)) {}
 };
 
 }  // namespace zusixml

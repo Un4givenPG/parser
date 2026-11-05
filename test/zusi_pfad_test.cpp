@@ -149,4 +149,38 @@ BOOST_AUTO_TEST_CASE(ZusiPfad_vonOsPfad_AndereInstallation) {
   BOOST_TEST(ZusiPfad::vonOsPfad(getZusiDatenpfad() + "Routes/Deutschland/Test/Test.st3").alsZusiPfad() == expected);
 }
 
+BOOST_AUTO_TEST_CASE(ZusiPfad_vonOsPfad_AndereInstallation_Referenzen) {
+#ifdef _WIN32
+  const std::string root = "X:/routegraph2-path-test/First/_ZusiData/";
+  const std::string otherRoot = "X:/routegraph2-path-test/Second/_ZusiData/";
+#else
+  const std::string root = "/tmp/routegraph2-path-test/First/_ZusiData/";
+  const std::string otherRoot = "/tmp/routegraph2-path-test/Second/_ZusiData/";
+#endif
+  const auto normalisiere = [](const std::string& pfad) {
+    return fs::path(pfad).make_preferred().string();
+  };
+  const std::string configuredRoot = getZusiDatenpfadOffiziell();
+  const auto timetable = ZusiPfad::vonOsPfad(root + "Timetables/Test/Test.fpn");
+  BOOST_TEST(normalisiere(timetable.alsOsPfad()) == normalisiere(root + "Timetables/Test/Test.fpn"));
+
+  const auto module = ZusiPfad::vonZusiPfad("Routes\\routegraph2-path-test\\Test.st3", timetable);
+  BOOST_TEST(module.alsZusiPfad() == "Routes\\routegraph2-path-test\\Test.st3");
+  BOOST_TEST(normalisiere(module.alsOsPfad()) == normalisiere(root + "Routes/routegraph2-path-test/Test.st3"));
+  BOOST_TEST(normalisiere(ZusiPfad::vonZusiPfad("\\Routes\\routegraph2-path-test\\Test.st3", timetable).alsOsPfad())
+      == normalisiere(root + "Routes/routegraph2-path-test/Test.st3"));
+  BOOST_TEST(normalisiere(ZusiPfad::vonZusiPfad("Sibling.st3", module).alsOsPfad())
+      == normalisiere(root + "Routes/routegraph2-path-test/Sibling.st3"));
+
+  const auto other = ZusiPfad::vonOsPfad(otherRoot + "Timetables/Test/Test.fpn");
+  BOOST_TEST(normalisiere(ZusiPfad::vonZusiPfad("Routes\\routegraph2-path-test\\Test.st3", other).alsOsPfad())
+      == normalisiere(otherRoot + "Routes/routegraph2-path-test/Test.st3"));
+  BOOST_TEST(normalisiere(module.alsOsPfad()) == normalisiere(root + "Routes/routegraph2-path-test/Test.st3"));
+  const auto copied = module;
+  BOOST_TEST(normalisiere(copied.alsOsPfad()) == normalisiere(root + "Routes/routegraph2-path-test/Test.st3"));
+  const auto bare = ZusiPfad::vonOsPfad(root + "Test.fpn");
+  BOOST_TEST(normalisiere(ZusiPfad::vonZusiPfad("Child.st3", bare).alsOsPfad()) == normalisiere(root + "Child.st3"));
+  BOOST_TEST(getZusiDatenpfadOffiziell() == configuredRoot);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
