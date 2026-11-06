@@ -183,4 +183,52 @@ BOOST_AUTO_TEST_CASE(ZusiPfad_vonOsPfad_AndereInstallation_Referenzen) {
   BOOST_TEST(getZusiDatenpfadOffiziell() == configuredRoot);
 }
 
+BOOST_AUTO_TEST_CASE(ZusiPfad_vonOsPfad_AndereInstallation_EigeneDaten) {
+  const auto root = fs::temp_directory_path() / ("zusi-pfad-test-" +
+      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  struct Aufraeumen {
+    std::vector<fs::path> pfade;
+    ~Aufraeumen() {
+#ifdef ZUSI_PARSER_USE_BOOST_FILESYSTEM
+      boost::system::error_code ec;
+#else
+      std::error_code ec;
+#endif
+      for (auto it = pfade.rbegin(); it != pfade.rend(); ++it) fs::remove(*it, ec);
+    }
+  } cleanup;
+  for (const auto& dir : {root, root / "Routes", root / "Timetables"}) {
+    BOOST_REQUIRE(fs::create_directory(dir));
+    cleanup.pfade.push_back(dir);
+  }
+  const auto moduleFile = root / "Routes" / "Test.st3";
+  const auto siblingFile = root / "Routes" / "Sibling.st3";
+  const auto timetableFile = root / "Timetables" / "Test.fpn";
+  for (const auto& file : {moduleFile, siblingFile, timetableFile}) {
+    io::ofstream stream(file.string());
+    BOOST_REQUIRE(stream.is_open());
+    cleanup.pfade.push_back(file);
+    stream << "<Zusi/>";
+  }
+  const auto normalisiere = [](const std::string& pfad) {
+    return fs::path(pfad).make_preferred().string();
+  };
+  const std::string ownRoot = getZusiDatenpfad();
+  const std::string officialRoot = getZusiDatenpfadOffiziell();
+  const auto module = ZusiPfad::vonOsPfad(moduleFile.string());
+  BOOST_TEST(module.alsZusiPfad() == "Routes\\Test.st3");
+  BOOST_TEST(normalisiere(module.alsOsPfad()) == normalisiere(moduleFile.string()));
+  BOOST_TEST(normalisiere(ZusiPfad::vonZusiPfad("Routes\\Test.st3", module).alsOsPfad()) == normalisiere(moduleFile.string()));
+  BOOST_TEST(normalisiere(ZusiPfad::vonZusiPfad("Test.st3", module).alsOsPfad()) == normalisiere(moduleFile.string()));
+  BOOST_TEST(normalisiere(ZusiPfad::vonZusiPfad("Sibling.st3", module).alsOsPfad()) == normalisiere(siblingFile.string()));
+  const auto timetable = ZusiPfad::vonOsPfad(timetableFile.string());
+  BOOST_TEST(timetable.alsZusiPfad() == "Timetables\\Test.fpn");
+  BOOST_TEST(normalisiere(timetable.alsOsPfad()) == normalisiere(timetableFile.string()));
+  BOOST_TEST(normalisiere(ZusiPfad::vonZusiPfad("Routes\\Test.st3", timetable).alsOsPfad()) == normalisiere(moduleFile.string()));
+  const auto copied = module;
+  BOOST_TEST(normalisiere(copied.alsOsPfad()) == normalisiere(moduleFile.string()));
+  BOOST_TEST(getZusiDatenpfad() == ownRoot);
+  BOOST_TEST(getZusiDatenpfadOffiziell() == officialRoot);
+}
+
 BOOST_AUTO_TEST_SUITE_END()

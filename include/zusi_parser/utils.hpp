@@ -284,16 +284,17 @@ public:
     if (zusiPfad.empty() || (zusiPfad.find('\\') != std::string_view::npos)) {
       auto pfad = vonZusiPfad(zusiPfad);
       pfad.m_datenpfadOffiziell = uebergeordnet.m_datenpfadOffiziell;
+      pfad.m_datenpfadEigen = uebergeordnet.m_datenpfadEigen;
       return pfad;
     }
 
     const auto lastBackslashPos = uebergeordnet.m_pfad.find_last_of('\\');
     if (lastBackslashPos == std::string::npos) {
-      return ZusiPfad(std::string(zusiPfad), uebergeordnet.m_datenpfadOffiziell);
+      return ZusiPfad(std::string(zusiPfad), uebergeordnet.m_datenpfadOffiziell, uebergeordnet.m_datenpfadEigen);
     } else {
       std::string pfad = uebergeordnet.m_pfad.substr(0, lastBackslashPos + 1);
       pfad += zusiPfad;
-      return ZusiPfad(std::move(pfad), uebergeordnet.m_datenpfadOffiziell);
+      return ZusiPfad(std::move(pfad), uebergeordnet.m_datenpfadOffiziell, uebergeordnet.m_datenpfadEigen);
     }
   }
 
@@ -307,7 +308,8 @@ public:
 
   static ZusiPfad vonOsPfad(std::string_view osPfad) {
     std::string datenpfadOffiziellQuelle;
-    std::string relPfad = [&osPfad, &datenpfadOffiziellQuelle] {
+    std::string datenpfadEigenQuelle;
+    std::string relPfad = [&osPfad, &datenpfadOffiziellQuelle, &datenpfadEigenQuelle] {
       // Optimierung fuer (haeufige) einfache Faelle, bei denen ein Stringvergleich genuegt
       const std::string& datenpfadOffiziell = getZusiDatenpfadOffiziell();
       if (std::mismatch(datenpfadOffiziell.begin(), datenpfadOffiziell.end(), osPfad.begin(), osPfad.end()).first == datenpfadOffiziell.end()) {
@@ -317,29 +319,6 @@ public:
       const std::string& datenpfad = getZusiDatenpfad();
       if (std::mismatch(datenpfad.begin(), datenpfad.end(), osPfad.begin(), osPfad.end()).first == datenpfad.end()) {
         return std::string(osPfad.substr(datenpfad.size()));
-      }
-
-      // Eine direkt geoeffnete Datei kann aus einer anderen Zusi-Installation
-      // stammen (z. B. Steam statt der in der Registry eingetragenen Version).
-      // Modulreferenzen verwenden auch dort Pfade relativ zu _ZusiData.
-      const fs::path dateipfad(osPfad.begin(), osPfad.end());
-      for (auto parent = dateipfad.parent_path(); !parent.empty();) {
-        if (
-#ifdef _WIN32
-            lstrcmpiA(parent.filename().string().c_str(), "_ZusiData") == 0
-#else
-            parent.filename() == "_ZusiData"
-#endif
-        ) {
-          datenpfadOffiziellQuelle = parent.string();
-          if (datenpfadOffiziellQuelle.back() != osSep) {
-            datenpfadOffiziellQuelle.push_back(osSep);
-          }
-          return dateipfad.lexically_relative(parent).string();
-        }
-        const auto next = parent.parent_path();
-        if (next == parent) break;
-        parent = next;
       }
 
       // Allgemeiner Fall
@@ -395,16 +374,76 @@ public:
         return relToOffiziell.string();
       }
 
-      return proximate(
+      const auto relToEigen = proximate(
           fs::path(osPfad.begin(), osPfad.end()),
-          fs::path(datenpfad.begin(), (!datenpfad.empty() && datenpfad.back() == osSep) ? std::prev(datenpfad.end()) : datenpfad.end())).string();
+          fs::path(datenpfad.begin(), (!datenpfad.empty() && datenpfad.back() == osSep) ? std::prev(datenpfad.end()) : datenpfad.end()));
+      if (relToEigen.is_relative() && (relToEigen.empty() || *relToEigen.begin() != "..")) {
+        return relToEigen.string();
+      }
+
+      // Eine direkt geoeffnete Datei kann aus einer anderen Zusi-Installation
+      // stammen (z. B. Steam statt der in der Registry eingetragenen Version).
+      // Modulreferenzen verwenden auch dort Pfade relativ zu _ZusiData.
+      const fs::path dateipfad(osPfad.begin(), osPfad.end());
+      for (auto parent = dateipfad.parent_path(); !parent.empty();) {
+        if (
+#ifdef _WIN32
+            lstrcmpiA(parent.filename().string().c_str(), "_ZusiData") == 0
+#else
+            parent.filename() == "_ZusiData"
+#endif
+        ) {
+          datenpfadOffiziellQuelle = parent.string();
+          if (datenpfadOffiziellQuelle.back() != osSep) {
+            datenpfadOffiziellQuelle.push_back(osSep);
+          }
+          return dateipfad.lexically_relative(parent).string();
+        }
+        const auto next = parent.parent_path();
+        if (next == parent) break;
+        parent = next;
+      }
+
+      // Eigene Datenverzeichnisse haben keinen festen Namen. Bei Modul- und
+      // Fahrplandateien kennzeichnet ein vorhandenes Routes bzw. Timetables
+      // die Datenwurzel.
+      // Diese Quelle muss vor dem konfigurierten eigenen Verzeichnis gelten.
+#ifdef ZUSI_PARSER_USE_BOOST_FILESYSTEM
+      boost::system::error_code datenwurzelFehler;
+#else
+      std::error_code datenwurzelFehler;
+#endif
+      for (auto parent = dateipfad.parent_path(); !parent.empty();) {
+        if (
+#ifdef _WIN32
+            lstrcmpiA(parent.filename().string().c_str(), "Routes") == 0 ||
+            lstrcmpiA(parent.filename().string().c_str(), "Timetables") == 0
+#else
+            parent.filename() == "Routes" || parent.filename() == "Timetables"
+#endif
+        ) {
+          const auto datenwurzel = parent.parent_path();
+          if (!datenwurzel.empty() && fs::is_directory(parent, datenwurzelFehler)) {
+            datenpfadEigenQuelle = datenwurzel.string();
+            if (datenpfadEigenQuelle.back() != osSep) {
+              datenpfadEigenQuelle.push_back(osSep);
+            }
+            return dateipfad.lexically_relative(datenwurzel).string();
+          }
+        }
+        const auto next = parent.parent_path();
+        if (next == parent) break;
+        parent = next;
+      }
+
+      return relToEigen.string();
     }();
 
     std::replace(relPfad.begin(), relPfad.end(), '/', '\\');
     if (relPfad.back() == '.') {
       relPfad.erase(relPfad.size() - 1);
     }
-    return ZusiPfad(std::move(relPfad), std::move(datenpfadOffiziellQuelle));
+    return ZusiPfad(std::move(relPfad), std::move(datenpfadOffiziellQuelle), std::move(datenpfadEigenQuelle));
   }
 
   std::string_view alsZusiPfad() const {
@@ -414,7 +453,8 @@ public:
   std::string alsOsPfad() const {
     // Pruefe, ob in eigenem Datenverzeichnis existiert.
     // Wenn nein -> gib Pfad in offiziellem Datenverzeichnis zurueck (unabhaengig davon, ob er existiert)
-    std::string resultEigenes = getZusiDatenpfad();
+    std::string resultEigenes = m_datenpfadEigen.empty()
+        ? getZusiDatenpfad() : m_datenpfadEigen;
     if constexpr (osSep != zusiSep) {
       std::replace_copy(m_pfad.begin(), m_pfad.end(), std::back_inserter(resultEigenes), zusiSep, osSep);
     } else {
@@ -451,9 +491,11 @@ private:
   // Herkunft einer direkt geoeffneten Datei aus einer anderen Installation.
   // Referenzen erben diesen Pfad; die globalen Einstellungen bleiben erhalten.
   std::string m_datenpfadOffiziell;
+  std::string m_datenpfadEigen;
 
-  explicit ZusiPfad(std::string pfad, std::string datenpfadOffiziell = {})
-      : m_pfad(std::move(pfad)), m_datenpfadOffiziell(std::move(datenpfadOffiziell)) {}
+  explicit ZusiPfad(std::string pfad, std::string datenpfadOffiziell = {}, std::string datenpfadEigen = {})
+      : m_pfad(std::move(pfad)), m_datenpfadOffiziell(std::move(datenpfadOffiziell)),
+        m_datenpfadEigen(std::move(datenpfadEigen)) {}
 };
 
 }  // namespace zusixml
